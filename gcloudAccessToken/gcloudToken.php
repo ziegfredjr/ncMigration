@@ -10,7 +10,7 @@
 
     try {
         // Set up authentication
-        putenv('GOOGLE_APPLICATION_CREDENTIALS=/Applications/XAMPP/xamppfiles/htdocs/nc_migration/config/nativecamp-91104-c876de69a5a6.json');
+        putenv('GOOGLE_APPLICATION_CREDENTIALS=/Applications/XAMPP/xamppfiles/htdocs/ncMigration/config/google-storage/credentials/nativecamp-91104-a63ba5eecd51.json');
 
         // Create an HTTP client with authentication
         $client = new Client([
