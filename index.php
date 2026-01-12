@@ -44,7 +44,8 @@
                                 AND `deleted_locally` = 0
                                 AND `is_new_skyway` = 0
                             GROUP BY `recording_id`
-                            ORDER BY `id` ASC LIMIT ?;
+                            ORDER BY `id` ASC 
+                            LIMIT ?;
                         ");
                     } else {
                         $stmt = $this->db->prepare("
@@ -57,7 +58,8 @@
                                 AND `deleted_locally` = 0
                                 AND `is_new_skyway` = 1
                             GROUP BY `skyway_channel_id`
-                            ORDER BY `id` ASC LIMIT ?;
+                            ORDER BY `id` ASC 
+                            LIMIT ?;
                         ");
                     }
 
