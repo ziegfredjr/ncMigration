@@ -1,0 +1,3 @@
+config/google-storage/credentials/*
+logs/*
+bin/*
