@@ -8,7 +8,7 @@
         private $db;
         private $bucketName = 'nc_webrtc_recording';
         private $skywayPath = '78974d5f-55a8-4469-85a8-e81002001b05';
-        private $batchSize = 900;
+        private $batchSize = 500;
         private $token;
         public $message;
         public $startDate;
@@ -26,6 +26,7 @@
             try {
                 if (!$this->db || $this->db->connect_errno) {
                     $this->message = "Database connection failed!";
+                    $this->logMessage($this->message . ": " . $this->db->connect_error, "error");
                     return;
                 }
 
@@ -118,10 +119,14 @@
                     }
                 }
             } catch (Exception $e) {
-                $this->message = "Error: " . $e->getMessage();
+                $this->logMessage("Error in run: " . $e->getMessage(), "error");
             }
         }
         
+        /**
+         * Get Google Cloud Access Token
+         * @return string
+         */
         private function getToken() {
             $tokenFile = __DIR__ . '/gcloudAccessToken/gcloudToken.php';
             if (file_exists($tokenFile)) {
@@ -132,6 +137,11 @@
             throw new Exception("Token file not found!");
         }
         
+        /**
+         * Process data and delete files from GCS
+         * @param array $recordings
+         * @return array status, recording_ids
+         */
         private function processData($recordings) {
             if (empty($recordings)) {
                 return ['success' => false, 'message' => 'No recordings to process.'];
