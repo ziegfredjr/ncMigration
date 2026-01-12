@@ -208,8 +208,8 @@
             
             return [
                 'success' => true,
-                // 'output' => $outputLog,
-                // 'status' => $returnVar,
+                'output' => $outputLog,
+                'status' => $returnVar,
                 'total_processed' => count($recordings),
                 'recording_ids' => $recordingIds,
                 'skyway_channel_ids' => $skywayChannelIds

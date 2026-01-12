@@ -1,3 +1,4 @@
 config/google-storage/credentials/*
 logs/*
 bin/*
+bin/delete_skyway_command.sh
