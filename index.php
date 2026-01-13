@@ -16,6 +16,9 @@
             $this->db = $db;
             $this->label = 'Fetching recordings to delete';
             $this->message = 'Active execution';
+
+            //- Set timezone to Asia/Manila
+            date_default_timezone_set('Asia/Manila');
         }
         
         public function run() {
@@ -282,6 +285,7 @@
     <body>
         <div class="container">
             <h2>Local Migration</h2>
+            <p><strong>Run Time: <?php echo date('Y-m-d h:i:s A'); ?></strong></p>
             <p><span class="label"><?php echo $migration->label; ?></span></p>
             <p><strong>Status:</strong> <span class="status"><?php echo $migration->message; ?></span></p>
             <?php  if (!empty($migration->recordingIds)): ?>
