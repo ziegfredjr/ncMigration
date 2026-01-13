@@ -8,13 +8,9 @@
         private $db;
         private $bucketName = 'nc_webrtc_recording';
         private $skywayPath = '78974d5f-55a8-4469-85a8-e81002001b05';
-        private $batchSize = 500;
+        private $batchSize = 100;
         private $token;
         public $message;
-        public $startDate;
-        public $endDate;
-        private $oldSkywayData = true; // fetch old data first
-        public $continue = true;
         
         public function __construct($db) {
             $this->db = $db;
@@ -30,113 +26,105 @@
                     return;
                 }
 
-                while(true) {
-                    //- fetch old skyway data first
-                    if ($this->oldSkywayData) {
-                        $oldRecordings = [];
-                        $stmt = $this->db->prepare("
-                            SELECT 
-                                `is_new_skyway`,
-                                `recording_id`
-                            FROM `lesson_audio_files` 
-                            WHERE `deleted_flg` = 1
-                                AND `deleted_flg_physical` = 0
-                                AND `deleted_locally` = 0
-                                AND `is_new_skyway` = 0
-                            GROUP BY `recording_id`
-                            ORDER BY `id` ASC 
-                            LIMIT ?;
-                        ");
-                    } else {
-                        $stmt = $this->db->prepare("
-                            SELECT 
-                                `is_new_skyway`,
-                                `skyway_channel_id`
-                            FROM `lesson_audio_files`
-                            WHERE `deleted_flg` = 1
-                                AND `deleted_flg_physical` = 0
-                                AND `deleted_locally` = 0
-                                AND `is_new_skyway` = 1
-                            GROUP BY `skyway_channel_id`
-                            ORDER BY `id` ASC 
-                            LIMIT ?;
-                        ");
-                    }
+                //- Initialize recordings array
+                $recordings = [];
+
+                //- fetch old skyway data first
+                $stmt = $this->db->prepare("
+                    SELECT 
+                        `is_new_skyway`,
+                        `recording_id`
+                    FROM `lesson_audio_files` 
+                    WHERE `deleted_flg` = 1
+                        AND `deleted_flg_physical` = 0
+                        AND `deleted_locally` = 0
+                        AND `is_new_skyway` = 0
+                    GROUP BY `recording_id`
+                    ORDER BY `id` ASC 
+                    LIMIT ?;
+                ");
+
+                $stmt->bind_param("i", $this->batchSize);
+                $stmt->execute();
+                $result = $stmt->get_result();
+
+                //- if result is empty, fetch new skyway data
+                if ($result->num_rows == 0) {
+                    $stmt->close();
+                    $stmt = $this->db->prepare("
+                        SELECT 
+                            `is_new_skyway`,
+                            `skyway_channel_id`
+                        FROM `lesson_audio_files`
+                        WHERE `deleted_flg` = 1
+                            AND `deleted_flg_physical` = 0
+                            AND `deleted_locally` = 0
+                            AND `is_new_skyway` = 1
+                        GROUP BY `skyway_channel_id`
+                        ORDER BY `id` ASC 
+                        LIMIT ?;
+                    ");
 
                     $stmt->bind_param("i", $this->batchSize);
                     $stmt->execute();
                     $result = $stmt->get_result();
-                    if ($result->num_rows == 0) {
-                        if ($this->oldSkywayData) {
-                            $this->oldSkywayData = false;
-                            $stmt->close();
-                            continue; // Retry with new skyway data
-                        } else {
-                            $this->message = "All eligible recordings have been processed.";
-                            break;
-                        }
-                    }
-
-                    $recordings = $result->fetch_all(MYSQLI_ASSOC);
-                    $stmt->close();
-                    
-                    if (!empty($recordings)) {
-                        $this->message = "Deleting recordings count : " . count($recordings) . "<br>";
-                        $deleteFile = $this->processData($recordings);
-                        $recordingIds = !empty($deleteFile['recording_ids']) ? $deleteFile['recording_ids'] : [];
-                        $skywayChannelIds = !empty($deleteFile['skyway_channel_ids']) ? $deleteFile['skyway_channel_ids'] : [];
-
-                        //- update old skyway recording
-                        if (!empty($recordingIds) && is_array($recordingIds)) {
-                            $idsPlaceholders = implode(',', array_fill(0, count($recordingIds), '?'));
-                            $types = str_repeat('s', count($recordingIds));
-                            $stmtUpdate = $this->db->prepare("
-                                UPDATE `lesson_audio_files` 
-                                SET `deleted_locally` = 1
-                                WHERE `recording_id` IN ($idsPlaceholders);
-                            ");
-                            $stmtUpdate->bind_param($types, ...$recordingIds);
-                            $stmtUpdate->execute();
-                            $stmtUpdate->close();
-                        }
-                        
-                        if (!empty($skywayChannelIds) && is_array($skywayChannelIds)) {
-                            $idsPlaceholders = implode(',', array_fill(0, count($skywayChannelIds), '?'));
-                            $types = str_repeat('s', count($skywayChannelIds));
-                            $stmtUpdate = $this->db->prepare("
-                                UPDATE `lesson_audio_files` 
-                                SET `deleted_locally` = 1
-                                WHERE `skyway_channel_id` IN ($idsPlaceholders);
-                            ");
-                            $stmtUpdate->bind_param($types, ...$skywayChannelIds);
-                            $stmtUpdate->execute();
-                            $stmtUpdate->close();
-                        }
-                        //- redirect next batch
-                        $this->redirect();
-                    } else {
-                        $this->message = "No recordings found to process.";
-                        $this->continue = false;
-                        break;
-                    }
                 }
+                
+                //- check results
+                if ($result->num_rows == 0) {
+                    $this->message = "No more recordings to process.";
+                    $stmt->close();
+                    return;
+                }
+
+                //- fetch all recordings
+                $recordings = $result->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
+                
+                if (!empty($recordings)) {
+                    //- run deletion process
+                    $deleteFile = $this->processData($recordings);
+                    $recordingIds = !empty($deleteFile['recording_ids']) ? $deleteFile['recording_ids'] : [];
+                    $skywayChannelIds = !empty($deleteFile['skyway_channel_ids']) ? $deleteFile['skyway_channel_ids'] : [];
+
+                    $this->recordingIds = $recordingIds;
+                    $this->skywayChannelIds = $skywayChannelIds;
+
+                    $this->message = "Deleting recordings count : " . count($recordings);
+
+                    //- update old skyway recording
+                    if (!empty($recordingIds) && is_array($recordingIds)) {
+                        $idsPlaceholders = implode(',', array_fill(0, count($recordingIds), '?'));
+                        $types = str_repeat('s', count($recordingIds));
+                        $stmtUpdate = $this->db->prepare("
+                            UPDATE `lesson_audio_files` 
+                            SET `deleted_locally` = 1
+                            WHERE `recording_id` IN ($idsPlaceholders);
+                        ");
+                        $stmtUpdate->bind_param($types, ...$recordingIds);
+                        $stmtUpdate->execute();
+                        $stmtUpdate->close();
+                    }
+                    
+                    if (!empty($skywayChannelIds) && is_array($skywayChannelIds)) {
+                        $idsPlaceholders = implode(',', array_fill(0, count($skywayChannelIds), '?'));
+                        $types = str_repeat('s', count($skywayChannelIds));
+                        $stmtUpdate = $this->db->prepare("
+                            UPDATE `lesson_audio_files` 
+                            SET `deleted_locally` = 1
+                            WHERE `skyway_channel_id` IN ($idsPlaceholders);
+                        ");
+                        $stmtUpdate->bind_param($types, ...$skywayChannelIds);
+                        $stmtUpdate->execute();
+                        $stmtUpdate->close();
+                    }
+                } else {
+                    $this->message = "No recordings found to process.";
+                }
+            
             } catch (Exception $e) {
                 $this->logMessage("Error in run: " . $e->getMessage(), "error");
             }
-        }
-        
-        /**
-         * Get Google Cloud Access Token
-         * @return string
-         */
-        private function getToken() {
-            $tokenFile = __DIR__ . '/gcloudAccessToken/gcloudToken.php';
-            if (file_exists($tokenFile)) {
-                ob_start();
-                include($tokenFile);
-                return trim(str_replace("Access Token: ", "", ob_get_clean()));
-            }
-            throw new Exception("Token file not found!");
         }
         
         /**
@@ -195,16 +183,16 @@
                 }
 
                 $commandString = sprintf(
-                    "%s \\\n",
+                    "\t%s \\\n",
                     escapeshellarg($objectName)
                 );
 
                 file_put_contents($filename, $commandString, FILE_APPEND);
             }
-            
-            file_put_contents($filename, "EOF", FILE_APPEND); 
 
-            exec("./$filename", $output, $returnVar);
+            file_put_contents($filename, "EOF\n", FILE_APPEND);
+
+            exec("./$filename 2>&1", $output, $returnVar);
 
             $outputLog = implode("\n", $output);
             
@@ -228,6 +216,20 @@
         }
 
         /**
+         * Get Google Cloud Access Token
+         * @return string
+         */
+        private function getToken() {
+            $tokenFile = __DIR__ . '/gcloudAccessToken/gcloudToken.php';
+            if (file_exists($tokenFile)) {
+                ob_start();
+                include($tokenFile);
+                return trim(str_replace("Access Token: ", "", ob_get_clean()));
+            }
+            throw new Exception("Token file not found!");
+        }       
+
+        /**
          * Detect the gcloud binary path
          * @return string
          */
@@ -248,16 +250,6 @@
 
             return 'gcloud'; // fallback to PATH
         }
-        
-        private function redirect() {
-            echo "<script>
-                    window.addEventListener('load', function() {   
-                        setTimeout(function() {
-                            window.location.href = 'index.php';
-                        }, 3000);
-                    });
-                </script>";
-        }
     }
     $migration = new GCSMigration($db);
     $migration->run();
@@ -269,6 +261,7 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Google Cloud Storage Files</title>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
         <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             .container { max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1); }
@@ -278,11 +271,24 @@
             .status { color: blue; }
         </style>
     </head>
+    <script>
+        $(function() {
+            setTimeout(() => {
+                console.log('Reloading page to continue migration process.');
+                window.location.reload();
+            }, 3000);
+        });
+    </script>
     <body>
         <div class="container">
             <h2>Local Migration</h2>
             <p><span class="label"><?php echo $migration->label; ?></span></p>
-            <p><strong>Status:</strong> <span class="status"><?php echo htmlspecialchars($migration->message, ENT_QUOTES, 'UTF-8'); ?></span></p>
+            <p><strong>Status:</strong> <span class="status"><?php echo $migration->message; ?></span></p>
+            <?php  if (!empty($migration->recordingIds)): ?>
+            <p><strong>Recording IDs Processed:</strong> <?php echo !empty($migration->recordingIds) ? implode(', ', $migration->recordingIds) : 'None'; ?></p>
+            <?php elseif (!empty($migration->skywayChannelIds)): ?>
+            <p><strong>Skyway Channel IDs Processed:</strong> <?php echo !empty($migration->skywayChannelIds) ? implode(', ', $migration->skywayChannelIds) : 'None'; ?></p>
+            <?php endif; ?>
         </div>
     </body>
 </html>
